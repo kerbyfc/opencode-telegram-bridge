@@ -76,7 +76,8 @@ listed under `plugins`, and the server log then shows a `loading plugin` line wi
 The session id comes from the command invocation itself, not from the environment. The outcome is
 shown in the session as the bridge's own line (a synthetic message that does not start a turn): the
 subcommand's line and the way back, or its reason on failure. Nothing is written to the topic, and
-the command carries no instructions for the model: away mode is transparent to it either way.
+the command carries no instructions for the model: away mode is transparent to it either way. The
+command runs through the plugin's own handler and starts no turn of the model — nothing is prompted.
 
 ## What OpenCode has of its own, and why
 
