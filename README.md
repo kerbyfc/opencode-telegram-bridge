@@ -59,7 +59,7 @@ repository, so the address has no `::path:` suffix:
 
 ```json
 {
-  "plugins": ["git+https://github.com/kerbyfc/opencode-telegram-bridge#v0.1.0"]
+  "plugins": ["git+https://github.com/kerbyfc/opencode-telegram-bridge#v0.2.0"]
 }
 ```
 
