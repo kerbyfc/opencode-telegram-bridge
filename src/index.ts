@@ -69,6 +69,8 @@ type sessionInfo = {
   readonly parentID?: string
   readonly location: { readonly directory: string }
   readonly time: { readonly created: number; readonly updated: number; readonly viewed?: number }
+  /** Название чата: имя темы без аргумента служба берёт из него. */
+  readonly title?: string
 }
 
 /**
@@ -407,9 +409,10 @@ export default {
     /**
      * attend поднимает соединение сессии; у поднятого — обновляет время последней работы. `at` —
      * когда сессию трогали: поднятым со старта оно их настоящее время, иначе вытеснение считало бы
-     * самой старой ту, которую подняли первой, то есть самую свежую по работе.
+     * самой старой ту, которую подняли первой, то есть самую свежую по работе. `title` — название
+     * чата из записи сессии: имя темы без аргумента служба берёт из него.
      */
-    function attend(sessionID: string, at = Date.now()): void {
+    function attend(sessionID: string, at = Date.now(), title = ""): void {
       const one = held.get(sessionID)
       if (one !== undefined) {
         one.seen = Math.max(one.seen, at)
@@ -464,6 +467,10 @@ export default {
       holders().add(sessionID)
       held.set(sessionID, { link, seen: at })
       link.start()
+
+      // Название чата уходит службе первым же готовым входом: у поднятой со старта сессии оно
+      // уже в её записи, и ждать переименования незачем.
+      link.title(title)
     }
 
     /**
@@ -561,7 +568,7 @@ export default {
         return
       }
 
-      attend(sessionID)
+      attend(sessionID, Date.now(), info.title ?? "")
     }
 
     /**
@@ -620,7 +627,7 @@ export default {
         .sort((left, right) => touched(right) - touched(left))
 
       for (const info of fresh.slice(0, links)) {
-        attend(info.id, touched(info))
+        attend(info.id, touched(info), info.title ?? "")
       }
 
       if (fresh.length > links) {
@@ -655,6 +662,14 @@ export default {
           await relocate(sessionID)
 
           continue
+        }
+
+        // Название чата поменялось: тема следует за ним, а держит её служба. Событие приходит на
+        // каждое переименование, в том числе когда владелец не у компьютера, — ждать его слова не
+        // надо. Название называется соединению сессии: своей темы у плагина нет.
+        if (event.type === "session.renamed") {
+          const renamed = event.data as { title?: string }
+          held.get(sessionID)?.link.title(renamed.title ?? "")
         }
 
         await consider(sessionID)

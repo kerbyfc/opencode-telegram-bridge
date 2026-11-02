@@ -24,7 +24,7 @@ type Host = Parameters<typeof plugin.setup>[0]
 /** Событие потока в том виде, в каком его отдаёт сервер: вид и нагрузка с id сессии. */
 type Sent = {
   readonly type: string
-  readonly data?: { readonly sessionID: string; readonly text?: string }
+  readonly data?: { readonly sessionID: string; readonly text?: string; readonly title?: string }
 }
 
 /** Сессия папки плагина и сессия чужой папки: вторую плагин держать не должен. */
@@ -155,6 +155,7 @@ const NAMES = [
   "FAKE_BRIDGE_AWAY_DELAY_MS",
   "FAKE_BRIDGE_DELIVERY",
   "FAKE_BRIDGE_INJECT",
+  "FAKE_BRIDGE_FRONT",
 ] as const
 
 // Поддельный мост — сценарий Node с первой строкой `#!`: без оболочки его запускает только POSIX.
@@ -722,3 +723,135 @@ test(
     }
   },
 )
+
+/** CHAT — название чата, каким его отдаёт запись сессии в тесте. */
+const CHAT = "Проверка моста"
+
+/** RENAMED — название чата после переименования. */
+const RENAMED = "Новое имя"
+
+test(
+  "название чата называется службе при соединении и на переименовании",
+  { timeout: 15_000, skip: process.platform === "win32" },
+  async () => {
+    const here = mkdtempSync(path.join(tmpdir(), "dmtg-name-"))
+    const log = path.join(here, "names.jsonl")
+    const front = path.join(here, "front.sock")
+    const saved = new Map(NAMES.map((name) => [name, process.env[name]]))
+
+    // Поток событий ведёт тест: сессия родилась, потом её переименовали.
+    const queue: Sent[] = []
+    let wake: (() => void) | undefined
+
+    async function* stream(): AsyncGenerator<Sent> {
+      for (;;) {
+        if (queue.length === 0) {
+          await new Promise<void>((resolve) => {
+            wake = resolve
+          })
+        }
+
+        const next = queue.shift()
+        if (next === undefined) {
+          return
+        }
+
+        yield next
+      }
+    }
+
+    const send = (event: Sent): void => {
+      queue.push(event)
+      wake?.()
+      wake = undefined
+    }
+
+    const now = Date.now()
+    const client = {
+      location: { directory: here },
+      session: {
+        list: async () => ({ data: [], cursor: { next: null } }),
+        get: async () => ({
+          location: { directory: here },
+          time: { created: now, updated: now },
+          title: CHAT,
+        }),
+        synthetic: async () => ({ id: "msg_0" }),
+      },
+      event: { subscribe: () => stream() },
+      tool: { hook: async () => ({ dispose: async () => undefined }) },
+      command: { transform: async () => ({ dispose: async () => undefined }) },
+    }
+
+    const original = process.stderr.write
+
+    // Названия уходят без ожидания: тест ждёт нужного их числа в журнале поддельного моста.
+    const reported = async (count: number): Promise<Array<{ path: string; body: string }>> => {
+      for (let tick = 0; tick < 200; tick += 1) {
+        const seen = readNames(log)
+        if (seen.length >= count) {
+          return seen
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+
+      return readNames(log)
+    }
+
+    try {
+      process.env.DM_TELEGRAM_BRIDGE = FAKE_BRIDGE
+      process.env.FAKE_BRIDGE_LOG = log
+      process.env.FAKE_BRIDGE_FRONT = front
+      process.stderr.write = (() => true) as typeof process.stderr.write
+
+      const stop = await plugin.setup(client as unknown as Host)
+
+      try {
+        send({ type: "session.created", data: { sessionID: "ses_имя" } })
+
+        const first = await reported(1)
+        assert.equal(first.length, 1, "название чата службе не названо")
+        assert.equal(first[0]?.path, "/name")
+        assert.deepEqual(JSON.parse(first[0]?.body ?? "{}"), { name: CHAT })
+
+        send({ type: "session.renamed", data: { sessionID: "ses_имя", title: RENAMED } })
+
+        const second = await reported(2)
+        assert.equal(second.length, 2, "переименование чата до службы не дошло")
+        assert.deepEqual(JSON.parse(second[1]?.body ?? "{}"), { name: RENAMED })
+      } finally {
+        stop()
+      }
+    } finally {
+      process.stderr.write = original
+
+      for (const [name, value] of saved) {
+        if (value === undefined) {
+          delete process.env[name]
+        } else {
+          process.env[name] = value
+        }
+      }
+
+      rmSync(here, { recursive: true, force: true })
+    }
+  },
+)
+
+/** readNames читает журнал поддельного моста: короткие запросы плагина по порядку. */
+function readNames(log: string): Array<{ path: string; body: string }> {
+  let text = ""
+
+  try {
+    text = readFileSync(log, "utf8")
+  } catch {
+    return []
+  }
+
+  return text
+    .split("\n")
+    .filter((line) => line.trim() !== "")
+    .map((line) => JSON.parse(line) as { path: string; body: string })
+    .filter((one) => one.path === "/name")
+}

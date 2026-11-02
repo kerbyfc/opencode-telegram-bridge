@@ -32,6 +32,12 @@ bottom of its window with the topic name.
 - **Questions with options.** A `tool.execute.before` handler on the `question` tool forwards the
   question to `telegram-bridge hook ask`, so in away mode the question reaches the topic instead of
   opening a dialog where nobody is looking.
+- **The topic's name is the chat's name.** Until you name the topic yourself, the topic is called
+  after the chat: the session's title comes from the client's own session record and from the
+  `session.renamed` event, and the plugin tells it to the service as an ordinary name when the
+  connection opens and on every rename — right away, without waiting for your word. A name you type,
+  `/away <name>` in the session or in the topic, wins over the chat's name and stays until you give
+  another one. A session without a title falls back to the bound topic and `default_topic_name`.
 - **The status line** at the bottom of the OpenCode window shows `TG: <topic name>` while the session
   has a topic.
 
@@ -89,6 +95,11 @@ The plugin reports turn boundaries itself: a session execution started is `POST 
 finished by success, failure, interruption or idleness is `POST /turn/end`. Turns are named by a
 counter of the connection, because the server names no turn id in its events; the counter starts
 again with the connection, and the service forgets the names at the same points.
+
+The chat's name is `POST /name {name}`, sent when the connection opens and again on `session.renamed`:
+the title is read from the session record the client gives the plugin, and the rename event is the
+client's own, so no transcript is read and no polling is done. The name means nothing to the service
+beyond "a name you did not type yourself".
 
 A finished agent reply is `POST /message` with its whole text, and the service sends it to the topic
 as one message. The server announces the end of a text block itself (`session.text.ended`), so the

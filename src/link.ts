@@ -17,6 +17,7 @@ const PATH_BYE = "/bye"
 const PATH_TURN_START = "/turn/start"
 const PATH_TURN_END = "/turn/end"
 const PATH_MESSAGE = "/message"
+const PATH_NAME = "/name"
 
 /** Исход подачи доставки в сессию: честь или придержанное слово. */
 export type Outcome = "accepted" | "rejected"
@@ -89,6 +90,13 @@ export class SessionLink {
    * одна, и большего от имени не требуется — служба сверяет его с тем, что держит сама.
    */
   private turn = 0
+  /**
+   * Название чата, каким его назвал сервер, и то, какое название уже ушло службе на этом
+   * соединении. Имя темы без аргумента служба берёт из него, а меняется оно — тема
+   * переименовывается.
+   */
+  private chat = ""
+  private named = ""
 
   constructor(session: string, handlers: Handlers) {
     this.session = session
@@ -178,6 +186,34 @@ export class SessionLink {
   }
 
   /**
+   * title называет службе название чата — имя темы без аргумента служба берёт из него. Пустое
+   * название не называется: у чата его нет, и прежнее имя темы остаётся.
+   *
+   * Название запоминается до входа соединения: `attend` поднимает соединение, когда название уже
+   * известно из записи сессии, а `ready` приходит позже — отдать его раньше некуда.
+   */
+  title(value: string): void {
+    const name = value.trim()
+
+    if (name === "") {
+      return
+    }
+
+    this.chat = name
+    this.speak()
+  }
+
+  /** speak называет службе запомненное название, если на этом входе оно ещё не названо. */
+  private speak(): void {
+    if (this.front === undefined || this.chat === "" || this.chat === this.named) {
+      return
+    }
+
+    this.named = this.chat
+    this.tell(PATH_NAME, { name: this.chat })
+  }
+
+  /**
    * farewell говорит службе, что сессия кончилась, и гасит соединение. Зовётся он там, где сессии
    * действительно не стало: хоронит её служба сама, и в тему о этом не пишется ничего.
    */
@@ -247,6 +283,10 @@ export class SessionLink {
       case "ready":
         this.front = event.socket
         this.handlers.opened?.(event)
+        // Название, запомненное до входа, уходит службе сразу: иначе имя темы без аргумента
+        // пришлось бы ждать переименования чата, а его может не быть вовсе.
+        this.named = ""
+        this.speak()
         note(`${this.session}: соединение со службой открыто, режим ${event.mode ?? "?"}`)
 
         return

@@ -14,11 +14,14 @@
 //
 // Подкоманда `link` при заданной `FAKE_BRIDGE_DELIVERY` печатает её строкой выдачи — доставкой слова
 // владельца — и живёт, пока её не погасят; при заданном каталоге `FAKE_BRIDGE_INJECT` печатает так же
-// каждый появившийся в нём файл `*.json` и удаляет его — тест подаёт слово, когда ему нужно. Без
-// обеих, как и любая другая подкоманда, кончается сразу кодом `1`: соединения сессии тест не
+// каждый появившийся в нём файл `*.json` и удаляет его — тест подаёт слово, когда ему нужно. При
+// заданном `FAKE_BRIDGE_FRONT` поднимает местный вход на этом сокете, называет его событием `ready`
+// и пишет в журнал каждый короткий запрос — так проверяется, что плагин говорит службе.
+// Без всех трёх, как и любая другая подкоманда, кончается сразу кодом `1`: соединения сессии тест не
 // поднимает.
 
 import { appendFileSync, readdirSync, readFileSync, rmSync } from "node:fs"
+import { createServer } from "node:http"
 import path from "node:path"
 
 /** Причина решения `deny`, как её получит модель; тест сверяет ту же строку. */
@@ -26,6 +29,32 @@ const REASON = "Вопрос отправлен владельцу в тему T
 
 const argv = process.argv.slice(2)
 const args = argv.join(" ")
+
+/** front — местный вход подкоманды: сокет, на котором тест слушает короткие запросы плагина. */
+const front = process.env.FAKE_BRIDGE_FRONT
+
+if (argv[0] === "link" && front !== undefined) {
+  rmSync(front, { force: true })
+
+  const server = createServer((request, response) => {
+    let body = ""
+
+    request.setEncoding("utf8")
+    request.on("data", (piece) => {
+      body += piece
+    })
+    request.on("end", () => {
+      appendFileSync(String(process.env.FAKE_BRIDGE_LOG), `${JSON.stringify({ path: request.url, body })}\n`)
+      response.writeHead(200, { "content-type": "application/json" })
+      response.end("{}\n")
+    })
+  })
+
+  server.listen(front, () => {
+    process.stdout.write(`${JSON.stringify({ event: "ready", socket: front, mode: "off" })}\n`)
+  })
+}
+
 
 // Команды режима: аргументы — строкой JSON в журнал, ответ — строкой, как у настоящей подкоманды.
 if (argv[0] === "away") {
@@ -44,7 +73,7 @@ if (argv[0] === "away") {
 
 const inject = process.env.FAKE_BRIDGE_INJECT
 
-if (argv[0] === "link" && (process.env.FAKE_BRIDGE_DELIVERY !== undefined || inject !== undefined)) {
+if (argv[0] === "link" && (process.env.FAKE_BRIDGE_DELIVERY !== undefined || inject !== undefined || front !== undefined)) {
   if (process.env.FAKE_BRIDGE_DELIVERY !== undefined) {
     process.stdout.write(`${process.env.FAKE_BRIDGE_DELIVERY}\n`)
   }
