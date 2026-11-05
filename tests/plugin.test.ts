@@ -13,7 +13,7 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { test } from "node:test"
 
-import { numeric, owned, pluginID, pluginRoot, samePath, treeRoot } from "../src/bridge.ts"
+import { numeric, owned, pluginID, pluginRoot, samePath, settingsPath, treeRoot } from "../src/bridge.ts"
 import { accepted, head, plan, rejected } from "../src/delivery.ts"
 import { closed } from "../src/link.ts"
 import { bound, claim, lost, spoken, stalest, waiting } from "../src/index.ts"
@@ -118,6 +118,16 @@ test("число из окружения: пусто — своё, негодн�
   }
 
   delete process.env[name]
+})
+
+test("настройки: названный путь сильнее домашнего, а без него берётся домашний config.yaml", () => {
+  const home = path.join("/", "дом")
+  const local = path.join(home, ".telegram-bridge", "config.yaml")
+
+  assert.equal(settingsPath("/свой/config.yaml", home, () => true), "/свой/config.yaml")
+  assert.equal(settingsPath(undefined, home, (file) => file === local), local)
+  assert.equal(settingsPath("", home, (file) => file === local), local)
+  assert.equal(settingsPath(undefined, home, () => false), undefined)
 })
 
 test("вытесняется самая старая по работе, а пустой набор не называет никого", () => {

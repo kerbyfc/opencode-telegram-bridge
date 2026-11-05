@@ -2,8 +2,9 @@
 // копия плагина — из какого дерева. Путей внутри состояния моста плагин не знает ни одного — он
 // зовёт подкоманды.
 
+import { existsSync, realpathSync } from "node:fs"
+import { homedir } from "node:os"
 import { spawnSync } from "node:child_process"
-import { realpathSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -18,6 +19,34 @@ export function binary(): string {
   const named = process.env.DM_TELEGRAM_BRIDGE
 
   return named !== undefined && named !== "" ? named : BINARY
+}
+
+/**
+ * settingsPath называет путь к настройкам службы: `DM_TELEGRAM_CONFIG`, а если он не назван —
+ * `~/.telegram-bridge/config.yaml`, когда файл есть. Без пути `telegram-bridge link` выходит с
+ * кодом 2, и канал не поднимается.
+ */
+export function settingsPath(
+  named: string | undefined,
+  home: string,
+  exists: (path: string) => boolean,
+): string | undefined {
+  if (named !== undefined && named !== "") {
+    return named
+  }
+
+  const fallback = path.join(home, ".telegram-bridge", "config.yaml")
+
+  return exists(fallback) ? fallback : undefined
+}
+
+/** adoptSettings кладёт найденный путь в окружение: его наследует каждая подкоманда моста. */
+export function adoptSettings(): void {
+  const found = settingsPath(process.env.DM_TELEGRAM_CONFIG, homedir(), existsSync)
+
+  if (found !== undefined) {
+    process.env.DM_TELEGRAM_CONFIG = found
+  }
 }
 
 /**

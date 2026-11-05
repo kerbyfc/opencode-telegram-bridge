@@ -48,8 +48,9 @@ session, into the session itself as a synthetic message (`◈ …`), which does 
 
 - OpenCode 2.1.4 or later, with plugins loaded from a Git address.
 - The `telegram-bridge` binary on `PATH`, or its full path in `DM_TELEGRAM_BRIDGE`.
-- `DM_TELEGRAM_CONFIG` in the environment of the OpenCode server: the path to the service's
-  `config.yaml`. The plugin does not read it; `telegram-bridge link` does.
+- `DM_TELEGRAM_CONFIG` in the environment of the OpenCode server, or the default
+  `~/.telegram-bridge/config.yaml`: the path to the service's `config.yaml`. The plugin does not read
+  it; `telegram-bridge link` does. The default is used only when that file exists.
 - A running `telegram-bridge` service and a Telegram bot that administers a forum group (topics).
 
 ## Installation

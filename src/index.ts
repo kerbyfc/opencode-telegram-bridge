@@ -15,7 +15,7 @@
 
 import type { Plugin } from "@opencode/plugin"
 
-import { note, numeric, pluginID, pluginRoot, reason, samePath } from "./bridge.ts"
+import { adoptSettings, note, numeric, pluginID, pluginRoot, reason, samePath } from "./bridge.ts"
 import { accepted, plan, rejected } from "./delivery.ts"
 import { SessionLink, type Linked, type Taken } from "./link.ts"
 import { toggle } from "./mode.ts"
@@ -235,6 +235,8 @@ export default {
   // считает ошибкой. Сессии каждая копия всё равно держит только свои — по `own` ниже.
   id: pluginID("opencode-telegram-bridge", pluginRoot(import.meta.url)),
   setup: async (context) => {
+    adoptSettings()
+
     const links = numeric("DM_TELEGRAM_OPENCODE_LINKS", LINKS)
     const revive = numeric("DM_TELEGRAM_OPENCODE_REVIVE_HOURS", REVIVE_HOURS) * 3600 * 1000
     const scan = numeric("DM_TELEGRAM_OPENCODE_SCAN", SCAN)
