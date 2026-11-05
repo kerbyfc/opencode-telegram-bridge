@@ -120,6 +120,16 @@ test("число из окружения: пусто — своё, негодн�
   delete process.env[name]
 })
 
+test("каждый запуск моста скрывает окно на Windows", () => {
+  for (const file of ["link.ts", "mode.ts", "question.ts", "status.ts"]) {
+    const source = readFileSync(new URL(`../src/${file}`, import.meta.url), "utf8")
+    const launches = source.match(/spawn\(binary\(\)/g)?.length ?? 0
+    const hidden = source.match(/windowsHide: true/g)?.length ?? 0
+
+    assert.equal(hidden >= launches, true, `${file}: запусков ${launches}, скрытых ${hidden}`)
+  }
+})
+
 test("настройки: названный путь сильнее домашнего, а без него берётся домашний config.yaml", () => {
   const home = path.join("/", "дом")
   const local = path.join(home, ".telegram-bridge", "config.yaml")

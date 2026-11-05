@@ -59,7 +59,10 @@ export type Toggled = { ok: boolean; line: string }
 /** toggle зовёт короткий вызов и называет исход строкой для владельца. */
 export function toggle(which: Switch, sessionID: string, typed: string): Promise<Toggled> {
   return new Promise<Toggled>((resolve) => {
-    const child = spawn(binary(), args(which, sessionID, typed), { stdio: ["ignore", "pipe", "pipe"] })
+    const child = spawn(binary(), args(which, sessionID, typed), {
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    })
 
     let out = ""
     let err = ""

@@ -126,6 +126,7 @@ export class SessionLink {
   start(): void {
     const child = spawn(binary(), ["link", "--session", this.session, "--client", "opencode"], {
       stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
     })
 
     this.child = child

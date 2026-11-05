@@ -67,6 +67,7 @@ export function parse(code: number | null, out: string): Status | null {
 export function read(sessionID: string, done: (status: Status | null) => void): void {
   const child = spawn(binary(), ["away", "status", "--session", sessionID, "--json"], {
     stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
   })
 
   let out = ""

@@ -137,7 +137,10 @@ function unread(printed: string): string {
  */
 export function ask(sessionID: string, input: unknown): Promise<Verdict> {
   return new Promise<Verdict>((resolve) => {
-    const child = spawn(binary(), ["hook", "ask"], { stdio: ["pipe", "pipe", "pipe"] })
+    const child = spawn(binary(), ["hook", "ask"], {
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
+    })
 
     let out = ""
     let err = ""
