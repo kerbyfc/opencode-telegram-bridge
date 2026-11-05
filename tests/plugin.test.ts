@@ -15,6 +15,7 @@ import { test } from "node:test"
 
 import { numeric, owned, pluginID, pluginRoot, samePath, treeRoot } from "../src/bridge.ts"
 import { accepted, head, plan, rejected } from "../src/delivery.ts"
+import { closed } from "../src/link.ts"
 import { bound, claim, lost, spoken, stalest, waiting } from "../src/index.ts"
 import { args, summary } from "../src/mode.ts"
 import { payload, verdict } from "../src/question.ts"
@@ -62,6 +63,15 @@ test("head отрезает имя команды от аргументов", ()
   assert.deepEqual(head("//away тема"), { name: "away", args: "тема" })
   assert.deepEqual(head("compact и ещё аргумент"), { name: "compact", args: "и ещё аргумент" })
   assert.deepEqual(head("   "), { name: "", args: "" })
+})
+
+test("конец соединения называет причину, которую сказала подкоманда", () => {
+  assert.equal(
+    closed("код 2", "telegram-bridge: путь к настройкам не назван: --config или DM_TELEGRAM_CONFIG\n"),
+    "канала нет, соединение кончилось (код 2): " +
+      "telegram-bridge: путь к настройкам не назван: --config или DM_TELEGRAM_CONFIG",
+  )
+  assert.equal(closed("код 1", "  \n"), "канала нет, соединение кончилось (код 1)")
 })
 
 test("исход подачи — один из двух, и честь без причины", () => {

@@ -43,6 +43,18 @@ export type Taken = {
   detail: string
 }
 
+/**
+ * closed называет конец соединения и причину, если подкоманда её сказала: код возврата без
+ * причины не говорит владельцу, чего не хватает, — так теряется «путь к настройкам не назван».
+ */
+export function closed(how: string, why: string): string {
+  const tail = why.trim()
+
+  return tail === ""
+    ? `канала нет, соединение кончилось (${how})`
+    : `канала нет, соединение кончилось (${how}): ${tail}`
+}
+
 /** Чем плагин отвечает подкоманде: подача доставки и разговор с владельцем. */
 export type Handlers = {
   /** deliver подаёт доставку в сессию и отвечает, чем это кончилось. */
@@ -77,6 +89,10 @@ export class SessionLink {
   private farewelled = false
   /** Незакрытый хвост стандартной выдачи: строки читаются по одной. */
   private rest = ""
+  /** Последняя строка потока ошибок подкоманды: по ней называется причина конца соединения. */
+  private why = ""
+  /** Незакрытый хвост потока ошибок: строка может прийти кусками. */
+  private whyRest = ""
   /**
    * Очередь разбора: куски выдачи приходят, пока прежний разбор ждёт подачу, и без очереди строки
    * двух кусков разбирались бы вперемешку. Отказ разбора снимается здесь же — необработанный он
@@ -123,7 +139,22 @@ export class SessionLink {
         })
     })
     child.stderr.setEncoding("utf8")
-    child.stderr.on("data", (chunk: string) => note(`${this.session}: ${chunk.trimEnd()}`))
+    child.stderr.on("data", (chunk: string) => {
+      note(`${this.session}: ${chunk.trimEnd()}`)
+
+      this.whyRest += chunk
+
+      const lines = this.whyRest.split(/\r?\n/)
+      this.whyRest = lines.pop() ?? ""
+
+      for (const line of lines) {
+        const text = line.trim()
+
+        if (text !== "") {
+          this.why = text
+        }
+      }
+    })
     child.on("error", (failure) => {
       this.said(`соединение со службой не поднялось: ${reason(failure)}`)
     })
@@ -144,7 +175,9 @@ export class SessionLink {
       // — в теме владелец увидит только отметку придержанного на своём сообщении, а причина
       // здесь.
       if (!this.spoken) {
-        this.said(`канала нет, соединение кончилось (${how})`)
+        const why = this.whyRest.trim() !== "" ? this.whyRest : this.why
+
+        this.said(closed(how, why))
       }
 
       this.handlers.ended?.(how)
