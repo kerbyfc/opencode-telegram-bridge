@@ -134,10 +134,13 @@ Dependencies are installed by `scripts/deps.ts` from the fingerprint of `package
 `package-lock.json`, under a lock on the directory, so a clean clone needs nothing by hand but the
 network for the first run. `node_modules` is not in git; the lock file is.
 
-The plugin brings one dependency: the `@opencode/plugin` SDK, pinned to an exact version. The TUI
-reactivity packages (`@opentui/*`, `solid-js`) and `effect` are optional peer dependencies, as in the
-SDK itself: a copy of the reactivity runtime in the plugin's `node_modules` would mean a second
-runtime in one process.
+The plugin brings two dependencies: the `@opencode/plugin` SDK, pinned to an exact version, and
+`@opentui/solid` — the JSX import source of the TUI half. The package is installed because
+OpenCode's plugin loader transpiles `tui.tsx` where the package lives, and the transpiler resolves
+the JSX import source on disk: a plugin installed under `node_modules` cannot borrow the host's copy
+at that step. At runtime the host maps the specifiers to its own OpenTUI, so the installed copy is
+never the running one. The remaining reactivity packages (`@opentui/core`, `solid-js`) and `effect`
+stay optional peer dependencies, as in the SDK itself.
 
 Code comments and test names are in Russian.
 
