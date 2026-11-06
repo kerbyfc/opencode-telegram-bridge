@@ -17,7 +17,7 @@ import type { Plugin } from "@opencode/plugin"
 
 import { adoptSettings, note, numeric, pluginID, pluginRoot, reason, samePath } from "./bridge.ts"
 import { accepted, plan, rejected } from "./delivery.ts"
-import { SessionLink, type Linked, type Taken } from "./link.ts"
+import { type Carried, SessionLink, type Linked, type Taken } from "./link.ts"
 import { toggle } from "./mode.ts"
 import { Notices } from "./notice.ts"
 import { ask, QUESTION_TOOL } from "./question.ts"
@@ -260,6 +260,14 @@ export default {
     const modes = new Map<string, boolean>()
     /** revivals — отложенный подъём соединения сессии, чья подкоманда умерла не отказом службы. */
     const revivals = new Map<string, ReturnType<typeof setTimeout>>()
+    /** inherited — что поднятое заново соединение наследует от умершего: сказанное и реплики. */
+    const inherited = new Map<string, Carried>()
+    /**
+     * acceptedIDs — доставки, которые сессия уже приняла. Служба подаёт запись заново, пока не
+     * услышала подтверждения, — после перезапуска службы или подкоманды посреди подачи; повтор в
+     * сессию второй раз не подаётся.
+     */
+    const acceptedIDs = new Map<string, Set<string>>()
 
     /**
      * respawn поднимает соединение сессии заново через паузу. Сессия, которую за это время сняли
@@ -275,6 +283,9 @@ export default {
           return
         }
 
+        // Пауза уже выдержана этим таймером: отметка неудачи не должна отбить подъём, если таймер
+        // сработал на миг раньше её срока.
+        failed.delete(sessionID)
         attend(sessionID, seen)
       }, pause)
 
@@ -283,10 +294,61 @@ export default {
       revivals.set(sessionID, timer)
     }
 
-    /** forgetRevival снимает отложенный подъём соединения сессии. */
+    /**
+     * forgetRevival снимает отложенный подъём соединения сессии вместе с наследством: сессию
+     * удалили, она переехала или плагин гасится — говорить в неё о репликах незачем.
+     */
     function forgetRevival(sessionID: string): void {
       clearTimeout(revivals.get(sessionID))
       revivals.delete(sessionID)
+      inherited.delete(sessionID)
+    }
+
+    /** lose говорит владельцу о репликах агента, которые так и не дождались канала. */
+    function lose(sessionID: string, count: number): void {
+      if (count > 0) {
+        warn(sessionID, `реплик агента не доставлено в тему: ${count.toString()} — канал не поднялся`)
+      }
+    }
+
+    /** warn говорит владельцу о разовой потере, мимо счёта «уже сказано». */
+    function warn(sessionID: string, line: string): void {
+      note(`${sessionID}: ${line}`)
+      tell(sessionID, line)
+    }
+
+    /** deduped подаёт доставку один раз: повтор принятой только подтверждается. */
+    function deduped(sessionID: string): (event: Linked) => Promise<Taken> {
+      const handle = deliver(sessionID)
+
+      return async (event: Linked) => {
+        const id = event.delivery_id ?? ""
+        const seen = acceptedIDs.get(sessionID) ?? new Set<string>()
+
+        acceptedIDs.set(sessionID, seen)
+
+        if (id !== "" && seen.has(id)) {
+          note(`${sessionID}: доставка ${id} уже принята, подтверждаю без второй подачи`)
+
+          return { outcome: "accepted", detail: "" }
+        }
+
+        const taken = await handle(event)
+
+        if (taken.outcome === "accepted" && id !== "") {
+          seen.add(id)
+
+          if (seen.size > 256) {
+            const oldest = seen.values().next().value
+
+            if (oldest !== undefined) {
+              seen.delete(oldest)
+            }
+          }
+        }
+
+        return taken
+      }
     }
     /**
      * notices — строки моста, которые ещё в пути или лежат в ящике сервера, и ход сессии: по ним
@@ -478,8 +540,13 @@ export default {
         return
       }
 
+      const carried = inherited.get(sessionID)
+
+      inherited.delete(sessionID)
+
       const link = new SessionLink(sessionID, {
-        deliver: deliver(sessionID),
+        deliver: deduped(sessionID),
+        warn: (line: string) => warn(sessionID, line),
         // Слово владельцу о пропавшем канале идёт через `once`, а не прямым `tell`: свой счёт
         // сказанного у каждого `SessionLink` чистый, и на прямом вызове владелец получал бы одно
         // и то же сообщение на каждую попытку соединения.
@@ -500,9 +567,14 @@ export default {
 
           if (again) {
             respawn(sessionID, seen)
+            inherited.set(sessionID, link.carried())
+
+            return
           }
+
+          lose(sessionID, link.leftovers().length)
         },
-      })
+      }, carried)
 
       holders().add(sessionID)
       held.set(sessionID, { link, seen: at })
@@ -546,6 +618,7 @@ export default {
       const link = drop(sessionID)
 
       forgetRevival(sessionID)
+      acceptedIDs.delete(sessionID)
       strangers.delete(sessionID)
       told.delete(sessionID)
       failed.delete(sessionID)
@@ -738,6 +811,13 @@ export default {
 
         const linked = held.get(sessionID)
         if (linked === undefined) {
+          // Подкоманда умерла и поднимается заново: реплика ждёт нового соединения, а не теряется.
+          const waiting = inherited.get(sessionID)
+
+          if (said !== undefined && waiting !== undefined) {
+            waiting.replies.push(said)
+          }
+
           continue
         }
 

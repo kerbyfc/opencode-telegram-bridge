@@ -1,11 +1,12 @@
-#!/usr/bin/env node
-// Поддельная подкоманда `link` для `link.test.ts`: тест называет её в `DM_TELEGRAM_BRIDGE`. Каждый
+// Поддельная подкоманда `link` для `link.test.ts`. Тест кладёт этот файл в свой каталог под именем
+// `link`, делает каталог рабочим и называет в `DM_TELEGRAM_BRIDGE` сам Node: плагин зовёт
+// `<node> link --session …`, и Node исполняет этот файл — так на любой площадке, Windows тоже. Каждый
 // запуск дописывает строку в файл `FAKE_LINK_COUNT` — по нему тест считает запуски — и берёт из
 // `FAKE_LINK_PLAN` (массив JSON) свой шаг по номеру запуска; последний шаг повторяется. Шаг — строки
 // выдачи (`lines`) и код выхода (`code`); без кода подкоманда живёт, пока её не погасят, как живёт
 // настоящая, переживающая потерю связи со службой.
 
-import { appendFileSync, readFileSync } from "node:fs"
+const { appendFileSync, readFileSync } = require("node:fs")
 
 const counter = String(process.env.FAKE_LINK_COUNT)
 

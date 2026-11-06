@@ -70,7 +70,25 @@ export type Handlers = {
   ended?: (how: string, again: boolean) => void
   /** opened называет режим и тему, как их назвала служба ответом на приветствие. */
   opened?: (event: Linked) => void
+  /**
+   * warn говорит владельцу о потере, которая случилась один раз и сама не вернётся: реплика агента
+   * не дошла до темы, подъём подкоманды не открыл соединения. Мимо счёта «уже сказано» — это не
+   * состояние канала.
+   */
+  warn?: (line: string) => void
 }
+
+/**
+ * Carried — что новое соединение сессии наследует от прежнего, умершего: сказано ли владельцу, что
+ * канала нет, — тогда возврат канала тоже говорится, — и реплики агента, не успевшие уйти.
+ */
+export type Carried = {
+  spoken: boolean
+  replies: string[]
+}
+
+/** Сколько реплик агента соединение копит без входа подкоманды; сверх — старейшая теряется. */
+const REPLIES_KEPT = 64
 
 /**
  * SessionLink — соединение одной сессии. Своё у него два: дочерний процесс подкоманды и адрес её
@@ -120,10 +138,27 @@ export class SessionLink {
    */
   private chat = ""
   private named = ""
+  /** Реплики агента, ждущие входа подкоманды, в порядке прихода. */
+  private replies: string[] = []
+  /** Это соединение — подъём после смерти прежнего, о которой владельцу уже сказано. */
+  private readonly revival: boolean
 
-  constructor(session: string, handlers: Handlers) {
+  constructor(session: string, handlers: Handlers, carried?: Carried) {
     this.session = session
     this.handlers = handlers
+    this.spoken = carried?.spoken ?? false
+    this.revival = carried?.spoken ?? false
+    this.replies = [...(carried?.replies ?? [])]
+  }
+
+  /** leftovers отдаёт реплики, которые так и не ушли: их подхватит следующее соединение. */
+  leftovers(): string[] {
+    return this.replies.splice(0)
+  }
+
+  /** carried — что унаследует соединение, поднятое на место этого. */
+  carried(): Carried {
+    return { spoken: this.spoken, replies: this.leftovers() }
   }
 
   /**
@@ -176,6 +211,16 @@ export class SessionLink {
 
       if (ours) {
         return
+      }
+
+      const opened = this.front !== undefined
+
+      // Подъём после сказанного «поднимаю заново» не открыл соединения: обещание не сбылось, и
+      // владелец узнаёт об этом, а не ждёт канала, которого не будет.
+      if (!opened && this.revival) {
+        const why = this.whyRest.trim() !== "" ? this.whyRest.trim() : this.why
+
+        this.handlers.warn?.(`канал не поднялся: ${why === "" ? how : why}`)
       }
 
       // Потеря связи со службой подкоманду не кончает: она звонит снова сама, в том же процессе.
@@ -238,7 +283,24 @@ export class SessionLink {
    * ожидания, как границы хода.
    */
   message(text: string): void {
+    // Входа ещё нет — реплика ждёт его, а не теряется молча.
+    if (this.front === undefined) {
+      this.keep(text)
+
+      return
+    }
+
     this.tell(PATH_MESSAGE, { text })
+  }
+
+  /** keep кладёт реплику в очередь до входа; сверх предела теряется старейшая, и владелец узнаёт. */
+  keep(text: string): void {
+    this.replies.push(text)
+
+    if (this.replies.length > REPLIES_KEPT) {
+      this.replies.shift()
+      this.handlers.warn?.(`реплика агента не дошла до темы: входа подкоманды нет, а копится не больше ${REPLIES_KEPT.toString()}`)
+    }
   }
 
   /**
@@ -343,8 +405,23 @@ export class SessionLink {
         // пришлось бы ждать переименования чата, а его может не быть вовсе.
         this.named = ""
         this.speak()
-        this.restored()
+
+        for (const text of this.leftovers()) {
+          this.tell(PATH_MESSAGE, { text })
+        }
+
         note(`${this.session}: соединение со службой открыто, режим ${event.mode ?? "?"}`)
+
+        return
+      case "steady":
+        // Сказанное о пропаже снимается, когда соединение прожило срок, а не на каждом `ready`:
+        // служба, падающая сразу после приветствия, иначе сыпала бы строками по кругу.
+        this.restored()
+
+        return
+      case "undelivered":
+        note(`${this.session}: ${event.text ?? ""}`)
+        this.handlers.warn?.(event.text ?? "реплика агента не дошла до темы")
 
         return
       case "delivery":

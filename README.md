@@ -60,7 +60,7 @@ repository, so the address has no `::path:` suffix:
 
 ```json
 {
-  "plugins": ["git+https://github.com/kerbyfc/opencode-telegram-bridge#v0.3.0"]
+  "plugins": ["git+https://github.com/kerbyfc/opencode-telegram-bridge#v0.3.1"]
 }
 ```
 
@@ -123,12 +123,17 @@ A restart of the service does not end a connection: `telegram-bridge link` stays
 dials again every second and greets the service with the same session, which gets its topic and away
 mode back. A restart that is over within 30 seconds is silent; a longer absence is said once in the
 session (`службы нет 30 с, жду её и подключусь сам`), and so is the channel coming back
-(`канал вернулся`).
+(`канал вернулся`) — once the connection has lived 10 seconds, so a service crashing right after the
+greeting does not repeat lines. Your word handed out before the restart is not submitted twice: the
+plugin remembers the deliveries a session accepted and only confirms a repeat. Agent replies written
+while the service or the subcommand is gone wait and reach the topic in order; a reply that cannot be
+delivered is said in the session.
 
 A connection that ended by itself is taken off the books. When the subcommand of an open connection
 died (it was killed or crashed) the session is told `канала нет … поднимаю заново`, and the plugin
 starts it again after `DM_TELEGRAM_OPENCODE_PAUSE_SECONDS` (30 seconds by default) without waiting
-for an event of the session. A subcommand that never opened a connection (the binary is not on
+for an event of the session; it carries over what was already said and the replies still waiting,
+and a restart that does not open a connection is said (`канал не поднялся: …`). A subcommand that never opened a connection (the binary is not on
 `PATH`, no settings are named) and a refusal of the service that a new connection cannot cure (a
 foreign contract version, another connection displaced it) are said and tried again only on the
 session's next event after the same pause.
