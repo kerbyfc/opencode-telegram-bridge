@@ -258,6 +258,36 @@ export default {
     const failed = new Map<string, number>()
     /** modes — режим, которым служба назвала сессию последним: по нему видно потерю темы. */
     const modes = new Map<string, boolean>()
+    /** revivals — отложенный подъём соединения сессии, чья подкоманда умерла не отказом службы. */
+    const revivals = new Map<string, ReturnType<typeof setTimeout>>()
+
+    /**
+     * respawn поднимает соединение сессии заново через паузу. Сессия, которую за это время сняли
+     * (удалена, переехала, плагин погашен) или подняли событием, заново не поднимается.
+     */
+    function respawn(sessionID: string, seen: number): void {
+      forgetRevival(sessionID)
+
+      const timer = setTimeout(() => {
+        revivals.delete(sessionID)
+
+        if (stop.signal.aborted || held.has(sessionID)) {
+          return
+        }
+
+        attend(sessionID, seen)
+      }, pause)
+
+      // Отложенный подъём процесс сервера не держит: сервер выходит, когда ему пора.
+      timer.unref()
+      revivals.set(sessionID, timer)
+    }
+
+    /** forgetRevival снимает отложенный подъём соединения сессии. */
+    function forgetRevival(sessionID: string): void {
+      clearTimeout(revivals.get(sessionID))
+      revivals.delete(sessionID)
+    }
     /**
      * notices — строки моста, которые ещё в пути или лежат в ящике сервера, и ход сессии: по ним
      * подаётся слово. Границы хода плагин читает из потока событий.
@@ -455,14 +485,22 @@ export default {
         // и то же сообщение на каждую попытку соединения.
         speak: (line: string) => once(sessionID, line),
         opened: (event: Linked) => greeted(sessionID, event),
-        ended: (how: string) => {
+        ended: (how: string, again: boolean) => {
           // Подкоманда вышла сама: дальше сервер живёт, а запись о сессии держала бы мёртвый
           // процесс и занимала место в пределе. Снимаем её с учёта и запоминаем время неудачи —
-          // новая попытка пойдёт не раньше паузы. Повторять её тут же незачем: подкоманда
-          // кончается только на отказе, который новым соединением не лечится.
+          // новая попытка пойдёт не раньше паузы. Потерю связи со службой подкоманда переживает
+          // сама, поэтому её конец — отказ службы, после которого звонить незачем, или смерть
+          // процесса: тогда соединение поднимается заново после паузы, не дожидаясь события
+          // сессии, — у сессии, где владелец не работает, его может не быть часами.
+          const seen = held.get(sessionID)?.seen ?? Date.now()
+
           drop(sessionID)
           failed.set(sessionID, Date.now())
           note(`${sessionID}: соединение снято с учёта, ${how}`)
+
+          if (again) {
+            respawn(sessionID, seen)
+          }
         },
       })
 
@@ -507,6 +545,7 @@ export default {
     async function release(sessionID: string): Promise<void> {
       const link = drop(sessionID)
 
+      forgetRevival(sessionID)
       strangers.delete(sessionID)
       told.delete(sessionID)
       failed.delete(sessionID)
@@ -522,6 +561,7 @@ export default {
      */
     async function relocate(sessionID: string): Promise<void> {
       strangers.delete(sessionID)
+      forgetRevival(sessionID)
       drop(sessionID)?.stop()
 
       note(`${sessionID}: сессия переехала, решаем заново`)
@@ -785,6 +825,10 @@ export default {
     // Скажи плагин «прощай», канал умер бы раньше клиента.
     return () => {
       stop.abort()
+
+      for (const sessionID of [...revivals.keys()]) {
+        forgetRevival(sessionID)
+      }
 
       for (const sessionID of [...held.keys()]) {
         drop(sessionID)?.stop()

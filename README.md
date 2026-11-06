@@ -60,7 +60,7 @@ repository, so the address has no `::path:` suffix:
 
 ```json
 {
-  "plugins": ["git+https://github.com/kerbyfc/opencode-telegram-bridge#v0.2.0"]
+  "plugins": ["git+https://github.com/kerbyfc/opencode-telegram-bridge#v0.3.0"]
 }
 ```
 
@@ -119,9 +119,19 @@ works both ways: sessions touched more recently are revived at start, and at the
 dropped. A live session's channel is never taken away by the limit: when every held session is
 fresher than the threshold, a new session gets no channel, and it is told so in the session itself.
 
-A connection that ended by itself (the service refused a foreign contract version, another
-connection displaced it, the binary is not on `PATH`, no settings are named) is taken off the books,
-and the next attempt waits `DM_TELEGRAM_OPENCODE_PAUSE_SECONDS` (30 seconds by default).
+A restart of the service does not end a connection: `telegram-bridge link` stays in the same process,
+dials again every second and greets the service with the same session, which gets its topic and away
+mode back. A restart that is over within 30 seconds is silent; a longer absence is said once in the
+session (`службы нет 30 с, жду её и подключусь сам`), and so is the channel coming back
+(`канал вернулся`).
+
+A connection that ended by itself is taken off the books. When the subcommand of an open connection
+died (it was killed or crashed) the session is told `канала нет … поднимаю заново`, and the plugin
+starts it again after `DM_TELEGRAM_OPENCODE_PAUSE_SECONDS` (30 seconds by default) without waiting
+for an event of the session. A subcommand that never opened a connection (the binary is not on
+`PATH`, no settings are named) and a refusal of the service that a new connection cannot cure (a
+foreign contract version, another connection displaced it) are said and tried again only on the
+session's next event after the same pause.
 
 ## Development
 
