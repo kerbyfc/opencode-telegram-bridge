@@ -18,7 +18,7 @@ import type { Plugin } from "@opencode/plugin"
 import { adoptSettings, note, numeric, pluginID, pluginRoot, reason, samePath } from "./bridge.ts"
 import { accepted, plan, rejected } from "./delivery.ts"
 import { type Carried, SessionLink, type Linked, type Taken } from "./link.ts"
-import { toggle } from "./mode.ts"
+import { away, toggle } from "./mode.ts"
 import { Notices } from "./notice.ts"
 import { ask, QUESTION_TOOL } from "./question.ts"
 
@@ -861,8 +861,9 @@ export default {
       }
     })
 
-    // Команды режима: `/away [имя темы]` и `/here`. Id сессии — из самого вызова команды, а не из
-    // окружения: у сервера OpenCode окружение одно на все сессии. Исход — строкой моста в сессии.
+    // Команды режима: `/away [имя]` и `/here`; имя после `/away` переименовывает сессию — см. `away`.
+    // Id сессии — из самого вызова команды, а не из окружения: у сервера OpenCode окружение одно на
+    // все сессии. Исход — строкой моста в сессии.
     // Своего задания модели у команды нет: для модели режим прозрачен, включён он или нет.
     //
     // Реестр команд сервера — словарь по имени: одноимённая команда следующей копии плагина заменяет
@@ -872,12 +873,19 @@ export default {
     await context.command.transform((commands) => {
       commands.add({
         name: "away",
-        description: "Telegram: режим «не у компьютера» — реплики и вопросы сессии идут в тему",
+        description: "Telegram: режим «не у компьютера» — реплики и вопросы сессии идут в тему; имя после команды переименовывает сессию",
         // Строка исхода в пути с самого начала команды: слово владельца, придержанное до режима,
         // служба отдаёт сразу после включения, и оно обязано встать в ящик после строки, а не перед.
         execute: async (call) => {
           await notices.carry(call.sessionID, async () =>
-            post(call.sessionID, (await toggle("on", call.sessionID, call.prompt.text)).line),
+            post(
+              call.sessionID,
+              (
+                await away(call.sessionID, call.prompt.text, async (sessionID, title) => {
+                  await context.session.update({ sessionID, title })
+                })
+              ).line,
+            ),
           )
         },
       })

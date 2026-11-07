@@ -1,4 +1,4 @@
-// Команды режима «не у компьютера» в сессии OpenCode: `/away [имя темы]` и `/here`. У Claude Code их
+// Команды режима «не у компьютера» в сессии OpenCode: `/away [имя]` и `/here`. У Claude Code их
 // объявляют командой с `!`-строкой, а OpenCode такую строку в команде не исполняет и id своей
 // сессии ей не даёт. Поэтому команды регистрирует плагин: id сессии он берёт из самого вызова
 // команды и зовёт тот же короткий вызов тонкого клиента, `telegram-bridge away on|off --session <id>`.
@@ -6,10 +6,13 @@
 // Исход владелец видит в самой сессии, как у Claude Code видит вывод команды в терминале: строкой
 // моста, которая хода не начинает. В тему не уходит ничего — `mode.on` и `mode.off` тему не пишут.
 // Задания модели у команды нет: для модели режим прозрачен, включён он или нет.
+//
+// Тема всегда носит название чата, поэтому имя после `/away` — новое название самой сессии, а не
+// имя темы поверх чата: плагин переименовывает сессию, и тема идёт за ней событием `session.renamed`.
 
 import { spawn } from "node:child_process"
 
-import { binary } from "./bridge.ts"
+import { binary, reason } from "./bridge.ts"
 
 /**
  * Срок короткого вызова. Включение режима может создать тему вызовом Bot API, поэтому он длиннее,
@@ -21,9 +24,9 @@ const TIMEOUT_MS = 30_000
 export type Switch = "on" | "off"
 
 /**
- * args собирает аргументы короткого вызова. Имя темы — всё, что набрано после команды, одной
- * строкой, как `"$ARGUMENTS"` у команды; пустое имя не передаётся вовсе — тогда служба берёт тему из
- * привязки сессии или из настройки по умолчанию.
+ * args собирает аргументы короткого вызова. Имя — всё, что набрано после команды, одной строкой, как
+ * `"$ARGUMENTS"` у команды; пустое имя не передаётся вовсе — тогда служба берёт тему из привязки
+ * сессии или из настройки по умолчанию.
  */
 export function args(which: Switch, sessionID: string, typed: string): string[] {
   if (which === "off") {
@@ -98,4 +101,30 @@ export function toggle(which: Switch, sessionID: string, typed: string): Promise
       finish(code === 0, summary(which, code, out, err))
     })
   })
+}
+
+/** Rename — переименование сессии OpenCode средством хозяина плагина. */
+export type Rename = (sessionID: string, title: string) => Promise<void>
+
+/** Toggle — короткий вызов режима; подменяется в тестах. */
+export type Toggle = (which: Switch, sessionID: string, typed: string) => Promise<Toggled>
+
+/**
+ * away включает режим командой `/away [имя]`. Непустое имя сначала становится названием сессии, и
+ * только потом зовётся `away on`: событие `session.renamed` к этому времени уже несёт службе новое
+ * название, и тема не успевает получить прежнее. Переименование не удалось — режим не включается, а
+ * причина идёт строкой исхода: иначе тема встала бы под имя, которого владелец не просил.
+ */
+export async function away(sessionID: string, typed: string, rename: Rename, enable: Toggle = toggle): Promise<Toggled> {
+  const name = typed.trim()
+
+  if (name !== "") {
+    try {
+      await rename(sessionID, name)
+    } catch (failure: unknown) {
+      return { ok: false, line: `режим не включён: сессия не переименована: ${reason(failure)}` }
+    }
+  }
+
+  return enable("on", sessionID, typed)
 }
