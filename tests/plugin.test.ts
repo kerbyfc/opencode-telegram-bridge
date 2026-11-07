@@ -17,7 +17,7 @@ import { numeric, owned, pluginID, pluginRoot, samePath, settingsPath, treeRoot 
 import { accepted, head, plan, rejected } from "../src/delivery.ts"
 import { closed } from "../src/link.ts"
 import { bound, claim, lost, spoken, stalest, waiting } from "../src/index.ts"
-import { args, summary } from "../src/mode.ts"
+import { args, away, summary, type Switch } from "../src/mode.ts"
 import { payload, verdict } from "../src/question.ts"
 import { parse } from "../src/status.ts"
 
@@ -354,4 +354,63 @@ test("вызов вопроса берёт один экземпляр плаг�
   assert.equal(claim("ses-a", "msg-1", "call_1"), true, "другой вызов — свой")
   assert.equal(claim("ses-b", "msg-1", "call_0"), true, "тот же id в другой сессии берётся заново")
   assert.equal(claim("ses-a", "msg-2", "call_0"), true, "тот же id в другом сообщении берётся заново")
+})
+
+/** Журнал поддельных переименования и короткого вызова: порядок вызовов и их аргументы. */
+type Called = { call: "rename"; sessionID: string; title: string } | { call: "toggle"; which: Switch; argv: string[] }
+
+/** fakes собирает переименование и короткий вызов, пишущие в общий журнал. */
+function fakes(refusal?: Error): {
+  calls: Called[]
+  rename: (sessionID: string, title: string) => Promise<void>
+  enable: (which: Switch, sessionID: string, typed: string) => Promise<{ ok: boolean; line: string }>
+} {
+  const calls: Called[] = []
+
+  return {
+    calls,
+    rename: async (sessionID, title) => {
+      calls.push({ call: "rename", sessionID, title })
+
+      if (refusal !== undefined) {
+        throw refusal
+      }
+    },
+    enable: async (which, sessionID, typed) => {
+      calls.push({ call: "toggle", which, argv: args(which, sessionID, typed) })
+
+      return { ok: true, line: "режим включён; выключение — `/here`" }
+    },
+  }
+}
+
+test("/away имя переименовывает сессию в это имя и только потом включает режим с ним же", async () => {
+  const { calls, rename, enable } = fakes()
+
+  assert.deepEqual(await away("ses_one", "  проба темы  ", rename, enable), {
+    ok: true,
+    line: "режим включён; выключение — `/here`",
+  })
+  assert.deepEqual(calls, [
+    { call: "rename", sessionID: "ses_one", title: "проба темы" },
+    { call: "toggle", which: "on", argv: ["away", "on", "проба темы", "--session", "ses_one"] },
+  ])
+})
+
+test("/away без имени сессию не переименовывает", async () => {
+  const { calls, rename, enable } = fakes()
+
+  await away("ses_one", "   ", rename, enable)
+
+  assert.deepEqual(calls, [{ call: "toggle", which: "on", argv: ["away", "on", "--session", "ses_one"] }])
+})
+
+test("отказ переименования виден в исходе, и режим не включается", async () => {
+  const { calls, rename, enable } = fakes(new Error("сессии нет"))
+
+  assert.deepEqual(await away("ses_one", "проба", rename, enable), {
+    ok: false,
+    line: "режим не включён: сессия не переименована: сессии нет",
+  })
+  assert.deepEqual(calls, [{ call: "rename", sessionID: "ses_one", title: "проба" }])
 })

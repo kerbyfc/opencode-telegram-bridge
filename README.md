@@ -26,18 +26,18 @@ bottom of its window with the topic name.
   block whole; tool calls, their input and thinking never reach the topic.
 - **Turn boundaries and liveness.** Every start and end of a turn is reported, so the topic shows
   "typing…" while the session works.
-- **`/away [topic name]` and `/here`** switch away mode for the session. The mode itself lives in
-  the service; the plugin only calls `telegram-bridge away on|off --session <id>` and shows the
-  outcome in the session.
+- **`/away [name]` and `/here`** switch away mode for the session. The mode itself lives in the
+  service; the plugin only calls `telegram-bridge away on|off --session <id>` and shows the outcome
+  in the session. A name after `/away` renames the session itself, and the topic follows it.
 - **Questions with options.** A `tool.execute.before` handler on the `question` tool forwards the
   question to `telegram-bridge hook ask`, so in away mode the question reaches the topic instead of
   opening a dialog where nobody is looking.
-- **The topic's name is the chat's name.** Until you name the topic yourself, the topic is called
-  after the chat: the session's title comes from the client's own session record and from the
-  `session.renamed` event, and the plugin tells it to the service as an ordinary name when the
-  connection opens and on every rename — right away, without waiting for your word. A name you type,
-  `/away <name>` in the session or in the topic, wins over the chat's name and stays until you give
-  another one. A session without a title falls back to the bound topic and `default_topic_name`.
+- **The topic's name is the chat's name, always.** The session's title comes from the client's own
+  session record and from the `session.renamed` event, and the plugin tells it to the service when
+  the connection opens and on every rename — right away, without waiting for your word. There is no
+  separate topic name above the chat's: `/away <name>` renames the session, and the topic gets the
+  new name through the same `session.renamed` event. A session without a title falls back to the
+  bound topic and `default_topic_name`.
 - **The status line** at the bottom of the OpenCode window shows `TG: <topic name>` while the session
   has a topic.
 
@@ -71,7 +71,7 @@ listed under `plugins`, and the server log then shows a `loading plugin` line wi
 
 | Command | What it does |
 |---|---|
-| `/away [topic name]` | turns away mode on for this session: `telegram-bridge away on [name] --session <id>` |
+| `/away [name]` | with a name, first renames the session to it, then turns away mode on: `telegram-bridge away on [name] --session <id>`; without a name, the session's title is left as is |
 | `/here` | turns it off: `telegram-bridge away off --session <id>` |
 
 The session id comes from the command invocation itself, not from the environment. The outcome is
@@ -79,6 +79,11 @@ shown in the session as the bridge's own line (a synthetic message that does not
 subcommand's line and the way back, or its reason on failure. Nothing is written to the topic, and
 the command carries no instructions for the model: away mode is transparent to it either way. The
 command runs through the plugin's own handler and starts no turn of the model — nothing is prompted.
+
+`/away <name>` renames the session through the plugin's client (`session.update` with `title`)
+before it calls `away on`, so the service already has the new title when it opens the topic, and the
+topic never shows another name. If the rename fails, away mode is not turned on, and the outcome line
+says why: `режим не включён: сессия не переименована: <reason>`.
 
 ## What OpenCode has of its own, and why
 

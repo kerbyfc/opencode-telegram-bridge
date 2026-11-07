@@ -294,6 +294,7 @@ test(
     const saved = new Map(NAMES.map((name) => [name, process.env[name]]))
     const added = new Map<string, Registered>()
     const said: Array<{ sessionID: string; text: string; description: string; resume: boolean }> = []
+    const renamed: Array<{ sessionID: string; title?: string }> = []
 
     async function* stream(): AsyncGenerator<never> {}
 
@@ -301,6 +302,9 @@ test(
       location: { directory: here },
       session: {
         list: async () => ({ data: [], cursor: { next: null } }),
+        update: async (input: { sessionID: string; title?: string }) => {
+          renamed.push({ sessionID: input.sessionID, title: input.title })
+        },
         synthetic: async (input: { sessionID: string; text: string; description: string; resume: boolean }) => {
           said.push({
             sessionID: input.sessionID,
@@ -360,6 +364,7 @@ test(
         .filter((line) => line.trim() !== "")
         .map((line) => (JSON.parse(line) as { argv: string[] }).argv)
 
+      assert.deepEqual(renamed, [{ sessionID: "ses_one", title: "проба темы" }], "имя после /away — название сессии")
       assert.deepEqual(argv, [
         ["away", "on", "проба темы", "--session", "ses_one"],
         ["away", "on", "--session", "ses_two"],
