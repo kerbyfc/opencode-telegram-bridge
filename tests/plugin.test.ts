@@ -8,7 +8,7 @@
 // поэтому без первого шага они не проверялись бы вовсе.
 
 import assert from "node:assert/strict"
-import { mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { test } from "node:test"
@@ -19,7 +19,7 @@ import { closed } from "../src/link.ts"
 import { bound, claim, lost, spoken, stalest, waiting } from "../src/index.ts"
 import { args, summary } from "../src/mode.ts"
 import { payload, verdict } from "../src/question.ts"
-import { parse } from "../src/status.ts"
+import { parse, read, type Status } from "../src/status.ts"
 
 /** Провенанс доставки: готовая строка, которую плагин приклеивает к подаче. */
 const PROVENANCE = "Доставлено из Telegram, автор Александр, человек"
@@ -180,6 +180,88 @@ test("ответ away status читается, а отказ не читаетс
   assert.equal(parse(0, "{}"), null, "ответ без режима — состояние неизвестно")
   assert.equal(parse(null, ""), null, "процесс убит пределом ожидания — состояние неизвестно")
 })
+
+/** Поддельный мост — сценарий Node с первой строкой `#!`: без оболочки его запускает только POSIX. */
+const FAKE_BRIDGE = path.resolve(import.meta.dirname, "fake-bridge.mjs")
+
+/** Переменные окружения, которые тесты дозвона ставят и обязаны вернуть. */
+const DIAL_NAMES = ["DM_TELEGRAM_BRIDGE", "FAKE_BRIDGE_LOG", "FAKE_BRIDGE_DOWN", "FAKE_BRIDGE_MODE"] as const
+
+/**
+ * probe — один опрос строки у поддельного моста: `down` — сколько первых дозвонов отказать,
+ * `mode` — режим ответа. Считает попытки по журналу поддельного моста и отдаёт состояние, которое
+ * получил колбэк.
+ */
+async function probe(down: string, mode?: string): Promise<{ status: Status | null; calls: number }> {
+  const here = mkdtempSync(path.join(tmpdir(), "dmtg-dial-"))
+  const log = path.join(here, "log")
+  const saved = new Map(DIAL_NAMES.map((name) => [name, process.env[name]]))
+
+  try {
+    writeFileSync(path.join(here, "down"), `${down}\n`)
+    process.env.DM_TELEGRAM_BRIDGE = FAKE_BRIDGE
+    process.env.FAKE_BRIDGE_LOG = log
+    process.env.FAKE_BRIDGE_DOWN = path.join(here, "down")
+    if (mode === undefined) {
+      delete process.env.FAKE_BRIDGE_MODE
+    } else {
+      process.env.FAKE_BRIDGE_MODE = mode
+    }
+
+    const status = await new Promise<Status | null>((resolve) => read("ses_проба", resolve))
+    const calls = readFileSync(log, "utf8")
+      .trim()
+      .split("\n")
+      .filter((line) => line.includes('"away","status"')).length
+
+    return { status, calls }
+  } finally {
+    for (const name of DIAL_NAMES) {
+      const was = saved.get(name)
+
+      if (was === undefined) {
+        delete process.env[name]
+      } else {
+        process.env[name] = was
+      }
+    }
+
+    rmSync(here, { recursive: true, force: true })
+  }
+}
+
+test(
+  "опрос строки перезванивает, пока служба поднимает сокет",
+  { timeout: 15_000, skip: process.platform === "win32" },
+  async () => {
+    const { status, calls } = await probe("2")
+
+    assert.deepEqual(status, { away: true, topic: "проба" }, "пережданное окно — состояние прочитано")
+    assert.equal(calls, 3, "два отказавших дозвона и третий, который прошёл")
+  },
+)
+
+test(
+  "отказ по живому соединению не перезванивает",
+  { timeout: 15_000, skip: process.platform === "win32" },
+  async () => {
+    const { status, calls } = await probe("0", "refuse")
+
+    assert.equal(status, null, "отказ службы — состояние неизвестно")
+    assert.equal(calls, 1, "служба приняла вызов — повтора нет")
+  },
+)
+
+test(
+  "дозвоны кончаются, и окно, которое не переждалось, названо последней попыткой",
+  { timeout: 15_000, skip: process.platform === "win32" },
+  async () => {
+    const { status, calls } = await probe("99")
+
+    assert.equal(status, null, "окно не переждалось — состояние неизвестно")
+    assert.equal(calls, 6, "пять повторов и последняя попытка")
+  },
+)
 
 test("граница хода называется по виду события сервера", () => {
   assert.equal(bound("session.execution.started"), "start")

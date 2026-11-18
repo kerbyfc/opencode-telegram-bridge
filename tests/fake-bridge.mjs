@@ -9,6 +9,10 @@
 // Подкоманды `away on|off` пишут в тот же журнал свои аргументы и отвечают строкой включения или
 // снятия; при `FAKE_BRIDGE_MODE=refuse` — отказом с причиной в потоке ошибок и ненулевым кодом.
 //
+// Подкоманда `away status --json` отвечает состоянием режима `on` и темой «проба»; пока в файле
+// `FAKE_BRIDGE_DOWN` число больше нуля, каждый вызов отказывает дозвоном («службы моста нет») и
+// уменьшает счётчик — так тест загоняет опрос строки в окно перезапуска службы.
+//
 // `FAKE_BRIDGE_AWAY_DELAY_MS` задерживает ответ `away`: так тест ловит доставку, пришедшую, пока
 // команда режима ещё идёт.
 //
@@ -20,7 +24,7 @@
 // Без всех трёх, как и любая другая подкоманда, кончается сразу кодом `1`: соединения сессии тест не
 // поднимает.
 
-import { appendFileSync, readdirSync, readFileSync, rmSync } from "node:fs"
+import { appendFileSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { createServer } from "node:http"
 import path from "node:path"
 
@@ -59,6 +63,31 @@ if (argv[0] === "link" && front !== undefined) {
 // Команды режима: аргументы — строкой JSON в журнал, ответ — строкой, как у настоящей подкоманды.
 if (argv[0] === "away") {
   appendFileSync(String(process.env.FAKE_BRIDGE_LOG), `${JSON.stringify({ argv })}\n`)
+
+  // Опрос строки режима: первые вызовы отказывают дозвоном по счётчику — окно перезапуска службы.
+  if (argv[1] === "status") {
+    const downFile = process.env.FAKE_BRIDGE_DOWN
+
+    if (downFile !== undefined) {
+      const left = Number(readFileSync(downFile, "utf8"))
+
+      if (left > 0) {
+        writeFileSync(downFile, `${String(left - 1)}\n`)
+        process.stderr.write(
+          "telegram-bridge: службы моста нет: сокет bridge.sock не отвечает: dial unix bridge.sock: connect: no such file or directory\n",
+        )
+        process.exit(1)
+      }
+    }
+
+    if (process.env.FAKE_BRIDGE_MODE === "refuse") {
+      process.stderr.write("служба отказала: bad-request\n")
+      process.exit(3)
+    }
+
+    process.stdout.write(`${JSON.stringify({ mode: "on", topic_id: 7, topic_name: "проба" })}\n`)
+    process.exit(0)
+  }
 
   await new Promise((resolve) => setTimeout(resolve, Number(process.env.FAKE_BRIDGE_AWAY_DELAY_MS ?? "0")))
 
